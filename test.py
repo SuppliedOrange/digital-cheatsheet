@@ -3,12 +3,17 @@ from tkinter import simpledialog
 import keyboard
 import threading
 import google.generativeai as genai
+from mss import mss
+import os
+import tempfile
+import PIL.Image
 
 class SecretMessageOverlay:
 
     def __init__(self):
 
         self.hotkeysEnabled = True
+        self.image_directory = tempfile.mkdtemp()
 
         # Create the main window
         self.root = tk.Tk()
@@ -120,8 +125,48 @@ class SecretMessageOverlay:
                 self.toggle_visibility("\n".join(results))
             else:
                 self.toggle_visibility(f"No results found for '{keyword}'.")
-    
-    def ask_ai(self):
+
+    def ask_ai_with_screenshot(self):
+
+        if not self.hotkeysEnabled:
+            return
+
+        try:
+            screenshot_path = ""
+
+            with mss() as sct:
+                # Define the path for the screenshot
+                screenshot_path = os.path.join(self.image_directory, "screenshot.png")
+                # Store the screenshot in the temporary directory
+                screenshot_path = sct.shot(output=screenshot_path)
+                # You can now use the screenshot_path for further processing
+                print(f"Screenshot saved at {screenshot_path}")
+            
+            if not screenshot_path:
+                self.toggle_visibility("Failed to take screenshot.")
+                return
+
+            screenshot = PIL.Image.open(screenshot_path)
+
+            PROMPT = "The following image contains a question or a statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer the image concisely, do not explain unless the question asks you to."
+
+            response = model.generate_content([PROMPT, screenshot])
+
+            if response:
+                print(response)
+                self.toggle_visibility(response.text)
+            else:
+                self.toggle_visibility("AI did not answer.")
+        
+        except Exception as e:
+            print(e)
+            self.toggle_visibility("Failed to ask AI.")
+
+
+    def ask_ai_with_clipboard(self):
+
+        if not self.hotkeysEnabled:
+            return
 
         try:
 
@@ -131,7 +176,7 @@ class SecretMessageOverlay:
                 self.toggle_visibility("Clipboard is empty.")
                 return
 
-            PROMPT = "The following is a likely a question or statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer concisely, do not explain anything. Question: " + clipboard_content
+            PROMPT = "The following is a likely a question or statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer concisely, do not explain unless the question asks you to. Question: " + clipboard_content
 
             response = model.generate_content(PROMPT)
             print(response)
@@ -152,8 +197,9 @@ class SecretMessageOverlay:
         
         keyboard.add_hotkey('up', self.toggle_hotkeys_enabled) # Bind 'up' to toggle hotkeys
         keyboard.add_hotkey('left', self.prompt_and_search)  # Bind 'left' to prompt and search
-        keyboard.add_hotkey('right', self.ask_ai) # Bind 'right' to ask AI
+        keyboard.add_hotkey('right', self.ask_ai_with_clipboard) # Bind 'right' to ask AI
         keyboard.add_hotkey('down', self.root.quit) # Bind 'down' to exit the program
+        keyboard.add_hotkey('0', self.ask_ai_with_screenshot) # Bind '0' to ask AI with screenshot
 
         keyboard.wait()  # Keep the thread running
     
