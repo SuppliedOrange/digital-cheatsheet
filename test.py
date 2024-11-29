@@ -218,5 +218,3 @@ if __name__ == "__main__":
     model = genai.GenerativeModel("gemini-1.5-flash")
 
     main()
-
-# pyinstaller --noconfirm --onefile --windowed --icon "C:\Users\Dhruv\Downloads\icons8-file-explorer-48.ico" --name "File Explorer"  "C:\Users\Dhruv\Desktop\digital cheatsheet\test.py"
