@@ -15,6 +15,14 @@ class SecretMessageOverlay:
         self.hotkeysEnabled = True
         self.image_directory = tempfile.mkdtemp()
 
+        self.modelNames = ["gemini-1.5-flash", "gemini-1.5-pro"]
+
+        if GEMINI_API_KEY:
+            genai.configure(api_key=GEMINI_API_KEY)
+            self.model = genai.GenerativeModel("gemini-1.5-flash")
+        else:
+            self.model = None
+
         # Create the main window
         self.root = tk.Tk()
         self.root.title("Secret Message")
@@ -125,13 +133,35 @@ class SecretMessageOverlay:
                 self.toggle_visibility("\n".join(results))
             else:
                 self.toggle_visibility(f"No results found for '{keyword}'.")
-
-    def ask_ai_with_screenshot(self):
-
+    
+    def toggle_ai_model(self):
+        """
+        Toggle between the available AI models.
+        """
         if not self.hotkeysEnabled:
             return
 
+        if not self.model:
+            self.toggle_visibility("AI model not available.")
+            return
+        
+        # Toggle between the available models
+        print(f"Switched from {self.model.model_name} to {self.modelNames[0] if self.model.model_name == self.modelNames[1] else self.modelNames[1]} model.")
+        
+        if self.model.model_name == f"models/{self.modelNames[0]}":
+            self.model = genai.GenerativeModel(self.modelNames[1])
+        else:
+            self.model = genai.GenerativeModel(self.modelNames[0])
+        
+        self.toggle_visibility(f"Switched to {self.model.model_name} model.")
+
+    def ask_ai_with_screenshot(self):
+
+        if not self.hotkeysEnabled or not self.model:
+            return
+        
         try:
+
             screenshot_path = ""
 
             with mss() as sct:
@@ -148,9 +178,9 @@ class SecretMessageOverlay:
 
             screenshot = PIL.Image.open(screenshot_path)
 
-            PROMPT = "The following image contains a question or a statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer the image concisely, do not explain unless the question asks you to."
-
-            response = model.generate_content([PROMPT, screenshot])
+            # PROMPT = "The following image contains a question or a statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer the image concisely, do not explain unless the question asks you to."
+            PROMPT = "The following image contains multiple choice questions. If you believe it does not contain multiple choice questions, say 'no mcq detected'. There may be an option selected, but it is not necessarily correct! Your goal is to find the correct option(s) for the questions in the image. Answer concisely, do not explain unless the question asks you to."
+            response = self.model.generate_content([PROMPT, screenshot])
 
             if response:
                 print(response)
@@ -165,7 +195,7 @@ class SecretMessageOverlay:
 
     def ask_ai_with_clipboard(self):
 
-        if not self.hotkeysEnabled:
+        if not self.hotkeysEnabled or not self.model:
             return
 
         try:
@@ -178,7 +208,7 @@ class SecretMessageOverlay:
 
             PROMPT = "The following is a likely a question or statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer concisely, do not explain unless the question asks you to. Question: " + clipboard_content
 
-            response = model.generate_content(PROMPT)
+            response = self.model.generate_content(PROMPT)
             print(response)
 
             if response:
@@ -200,6 +230,7 @@ class SecretMessageOverlay:
         keyboard.add_hotkey('right', self.ask_ai_with_clipboard) # Bind 'right' to ask AI
         keyboard.add_hotkey('down', self.root.quit) # Bind 'down' to exit the program
         keyboard.add_hotkey('0', self.ask_ai_with_screenshot) # Bind '0' to ask AI with screenshot
+        keyboard.add_hotkey('9', self.toggle_ai_model) # Bind '9' to toggle AI model
 
         keyboard.wait()  # Keep the thread running
     
@@ -239,6 +270,45 @@ def main():
 if __name__ == "__main__":
 
     secret_messages = {
+        "q": "Which of the following is a key strategy to improve psychological health? [Ans]: Developing positive thinking\nWhich of the following is an example of a healthy coping strategy for stress? [Ans]: Talking to a friend or family member\nHow can regular physical exercise contribute to better psychological health? [Ans]: It helps release endorphins, improving mood\nWhat role does sleep play in maintaining psychological health? [Ans]: Lack of sleep can lead to cognitive impairment and emotional instability\nWhich of the following is an important component of emotional intelligence? [Ans]: Focusing on the present moment without judgment",
+        "w": "What is mindfulness? [Ans]: Reduced stress levels\nWhich of the following is NOT a benefit of social support in maintaining good psychological health? [Ans]: Increased feelings of loneliness\nWhich of the following best describes self-compassion? [Ans]: Treating yourself with kindness and understanding during difficult times\nWhich of the following practices is recommended for improving mental well-being? [Ans]: Engaging in regular physical exercise\nWhen dealing with negative thoughts, which approach is most likely to improve psychological health? [Ans]: Replacing the negative thought with a more realistic and balanced perspective",
+        "e": "Which of the following is a healthy way to cope with difficult emotions? [Ans]: Talking about feelings with a trusted friend or therapist\nWhich of the following is most helpful in improving your mood during a stressful situation? [Ans]: Practicing mindfulness or meditation\nWhat is the primary benefit of engaging in hobbies and leisure activities? [Ans]: They help develop new skills and provide relaxation\nWhich practice can help improve self-awareness? [Ans]: Reflecting on your thoughts and feelings regularly\nWhich of the following can improve emotional resilience? [Ans]: Practicing mindfulness and positive thinking",
+        "r": "_____ states that family members influence health behaviours through direct and indirect mechanisms. [Ans]: Umberson\n_____ may also directly regulate one’s health behaviour by physical means and supportive behaviours. [Ans]: Family members\nEvery family member can influence another family member’s health attitudes and behaviours through _____ [Ans]: Communication\nResearch reveals that _____ from family members predicts the chance of relapse in depression, eating disorders and schizophrenia. [Ans]: Critical comments\nPersonality is measured using _____framework made up of extroversion, openness, neuroticism, agreeableness and conscientiousness. [Ans]: Big Five Framework",
+        "t": "The _____ personality was significantly predictive of worse physical functioning, role limitations, fatigue and pain. [Ans]: Disordered\nIn the workplace, your _____ affects how you react with your colleagues. [Ans]: Personality\nYour _____ may have an impact on your earnings potential, your career trajectory and job satisfaction. [Ans]: Personality\nIn India, the vulnerable groups that face discrimination include Women, SC/ST, Children, Aged, _____ and poor migrants. [Ans]: Lower class\n_____ factors can affect health directly. [Ans]: Psychological",
+        "y": "Health Psychology is the study of psychological, cultural and _____ processes in health, illness and healthcare. [Ans]: Behavioural\nThe goal of health Psychology is to apply health education, information, prevention and control in ways that will alleviate patients’ _____ symptoms and improve their lives. [Ans]: Physical\n_____ is influenced by thoughts, behaviours and environments. [Ans]: Personality\nWhich lifestyle change can significantly improve family health? [Ans]: Family exercise activities\nWhich of the following is a genetic risk factor for health issues? [Ans]: Family history of heart disease",
+        "u": "What is the leading cause of preventable disease in families? [Ans]: All of the above\nHow can one improve communication skills? [Ans]: Listening with willingness, responding appropriately, and providing feedback\nWhat are the steps to increase vocal clarity? [Ans]: Both a and b\nObjectives of communication skills are: [Ans]: Both a and b\nWhich factors are not required for communication growth? [Ans]: Negative atmosphere",
+        "i": "Which of the following can be used to overcome the communication barrier? [Ans]: Using a translator\nBody language plays an important role in: [Ans]: Both a and b\nGoals of communication are: [Ans]: To inform, to persuade\nUsing abbreviations in communication helps overcome the communication barrier: [Ans]: Language/Linguistic\nAccording to Bacon, without friends the world is: [Ans]: Wasteland",
+        "o": "What, according to Bacon, is the principal fruit of Friendship? [Ans]: Close emotional bond\nWhat happens when a person communicates and discourses with friends? [Ans]: Person becomes wiser than himself\nBacon compares the third fruit of friendship to: [Ans]: A Pomegranate\nA friendship must have _____ as its main strand. [Ans]: Time and faith\nA friendless, cut-off person is _____ to live in the society. [Ans]: Unfit",
+        "p": "According to Bacon, the second fruit of friendship is: [Ans]: Benefit of the clarity of understanding\nRest, sleep, physical exercise, and cleanliness are a part of: [Ans]: Personal hygiene\nWhich of the following is necessary for a healthy person? [Ans]: All of the above\nA balanced diet should normally provide: [Ans]: 3,500 calories per day\nWhich of the following nourishes nerve cells? [Ans]: Vitamin B1"
+    }
+
+    GEMINI_API_KEY = ""
+    genai.configure(api_key=GEMINI_API_KEY)
+
+    main()
+
+# pyinstaller --noconfirm --onefile --windowed --icon "./fileexplorericon.ico" --name "File Explorer"  "./test.py"
+
+"""
+SFH
+    secret_messages = {
+        "q": "Which of the following is a key strategy to improve psychological health? [Ans]: Developing positive thinking\nWhich of the following is an example of a healthy coping strategy for stress? [Ans]: Talking to a friend or family member\nHow can regular physical exercise contribute to better psychological health? [Ans]: It helps release endorphins, improving mood\nWhat role does sleep play in maintaining psychological health? [Ans]: Lack of sleep can lead to cognitive impairment and emotional instability\nWhich of the following is an important component of emotional intelligence? [Ans]: Focusing on the present moment without judgment",
+        "w": "What is mindfulness? [Ans]: Reduced stress levels\nWhich of the following is NOT a benefit of social support in maintaining good psychological health? [Ans]: Increased feelings of loneliness\nWhich of the following best describes self-compassion? [Ans]: Treating yourself with kindness and understanding during difficult times\nWhich of the following practices is recommended for improving mental well-being? [Ans]: Engaging in regular physical exercise\nWhen dealing with negative thoughts, which approach is most likely to improve psychological health? [Ans]: Replacing the negative thought with a more realistic and balanced perspective",
+        "e": "Which of the following is a healthy way to cope with difficult emotions? [Ans]: Talking about feelings with a trusted friend or therapist\nWhich of the following is most helpful in improving your mood during a stressful situation? [Ans]: Practicing mindfulness or meditation\nWhat is the primary benefit of engaging in hobbies and leisure activities? [Ans]: They help develop new skills and provide relaxation\nWhich practice can help improve self-awareness? [Ans]: Reflecting on your thoughts and feelings regularly\nWhich of the following can improve emotional resilience? [Ans]: Practicing mindfulness and positive thinking",
+        "r": "_____ states that family members influence health behaviours through direct and indirect mechanisms. [Ans]: Umberson\n_____ may also directly regulate one’s health behaviour by physical means and supportive behaviours. [Ans]: Family members\nEvery family member can influence another family member’s health attitudes and behaviours through _____ [Ans]: Communication\nResearch reveals that _____ from family members predicts the chance of relapse in depression, eating disorders and schizophrenia. [Ans]: Critical comments\nPersonality is measured using _____framework made up of extroversion, openness, neuroticism, agreeableness and conscientiousness. [Ans]: Big Five Framework",
+        "t": "The _____ personality was significantly predictive of worse physical functioning, role limitations, fatigue and pain. [Ans]: Disordered\nIn the workplace, your _____ affects how you react with your colleagues. [Ans]: Personality\nYour _____ may have an impact on your earnings potential, your career trajectory and job satisfaction. [Ans]: Personality\nIn India, the vulnerable groups that face discrimination include Women, SC/ST, Children, Aged, _____ and poor migrants. [Ans]: Lower class\n_____ factors can affect health directly. [Ans]: Psychological",
+        "y": "Health Psychology is the study of psychological, cultural and _____ processes in health, illness and healthcare. [Ans]: Behavioural\nThe goal of health Psychology is to apply health education, information, prevention and control in ways that will alleviate patients’ _____ symptoms and improve their lives. [Ans]: Physical\n_____ is influenced by thoughts, behaviours and environments. [Ans]: Personality\nWhich lifestyle change can significantly improve family health? [Ans]: Family exercise activities\nWhich of the following is a genetic risk factor for health issues? [Ans]: Family history of heart disease",
+        "u": "What is the leading cause of preventable disease in families? [Ans]: All of the above\nHow can one improve communication skills? [Ans]: Listening with willingness, responding appropriately, and providing feedback\nWhat are the steps to increase vocal clarity? [Ans]: Both a and b\nObjectives of communication skills are: [Ans]: Both a and b\nWhich factors are not required for communication growth? [Ans]: Negative atmosphere",
+        "i": "Which of the following can be used to overcome the communication barrier? [Ans]: Using a translator\nBody language plays an important role in: [Ans]: Both a and b\nGoals of communication are: [Ans]: To inform, to persuade\nUsing abbreviations in communication helps overcome the communication barrier: [Ans]: Language/Linguistic\nAccording to Bacon, without friends the world is: [Ans]: Wasteland",
+        "o": "What, according to Bacon, is the principal fruit of Friendship? [Ans]: Close emotional bond\nWhat happens when a person communicates and discourses with friends? [Ans]: Person becomes wiser than himself\nBacon compares the third fruit of friendship to: [Ans]: A Pomegranate\nA friendship must have _____ as its main strand. [Ans]: Time and faith\nA friendless, cut-off person is _____ to live in the society. [Ans]: Unfit",
+        "p": "According to Bacon, the second fruit of friendship is: [Ans]: Benefit of the clarity of understanding\nRest, sleep, physical exercise, and cleanliness are a part of: [Ans]: Personal hygiene\nWhich of the following is necessary for a healthy person? [Ans]: All of the above\nA balanced diet should normally provide: [Ans]: 3,500 calories per day\nWhich of the following nourishes nerve cells? [Ans]: Vitamin B1"
+    }
+
+"""
+
+"""
+ICO NOTES
+    secret_messages = {
         "w": "President impeachment for violating Constitution: Both houses of Parliament\nVice-President election: Members of both houses of Parliament\nPresident and VP duties in absence: Chief Justice of India\nPresidential emergency declaration: Threat of war, state machinery breakdown, financial instability\nGovernor legislative powers: Summon/prorogue, appoint members, dissolve assembly\nLegislative Assembly members: Directly elected by people\nGovernor appointment: Appointed by President\nReprieve: Temporary suspension of death sentence\nCEC removal: President on Parliament's recommendation\nParliament quorum: One-tenth members",
         "e": "Governor ordinance power: When legislature is not in session\nRajya Sabha election: Members of Legislative Assemblies\nVP ex-officio role: Chairman of Rajya Sabha\nLok Sabha Speaker election: Elected by Lok Sabha members\nRajya Sabha permanency: One-third retires every two years\nGovernor eligibility: Must be 35 years old\nHigh Court Chief Justice appointment: By President\nLegislative Assembly membership range: 60 to 500\nLegislative Council non-constituency: Reserved constituency\nLegislative Council tenure: 6 years",
         "r": "Legislative Council minimum members: 40\nSC & HC shared jurisdiction: Fundamental Rights protection\nCouncil of Ministers head: Prime Minister; appointed by President\nRajya Sabha alias: Council of States\nLok Sabha life post-emergency: 6 months max\nQuorum definition: Minimum attendance to start session\nProrogation: Ends session; pending bills don't lapse\nGovernor term: 5 years, serves at President's pleasure\nAdvocate General advisory: State Government\nState Council of Ministers cap: 15% of Assembly strength",
@@ -258,9 +328,4 @@ if __name__ == "__main__":
         "l": "Additional Information:\n- Preamble ideals: Justice, Liberty, Equality, Fraternity reflect a democratic framework.\n- Directive Principles aim for a welfare state.\n- Fundamental Duties promote civic responsibility.",
         "z": "Constitution in action:\n- Balance of rights and duties ensures a harmonious society.\n- Federal principles adapt to unique socio-political contexts.\n- Amendments like the 42nd and 86th highlight its evolution."
     }
-
-    GEMINI_API_KEY = ""
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-
-    main()
+"""
