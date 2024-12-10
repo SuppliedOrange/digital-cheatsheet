@@ -7,6 +7,10 @@ from mss import mss
 import os
 import tempfile
 import PIL.Image
+import pyperclip
+from pynput.keyboard import Controller
+import pynput.keyboard as pykeyboard
+import time
 
 class SecretMessageOverlay:
 
@@ -80,6 +84,31 @@ class SecretMessageOverlay:
         # Start keyboard listener in a separate thread
         self.keyboard_thread = threading.Thread(target=self.start_keyboard_listener, daemon=True)
         self.keyboard_thread.start()
+
+    def type_clipboard_contents(self):
+        """
+        Types out the contents of the clipboard using the keyboard.
+
+        Args:
+            delay_between_keys (float): Time delay (in seconds) between each keypress.
+        """
+
+        if not self.hotkeysEnabled:
+            return
+
+        clipboard_content = pyperclip.paste()  # Get the clipboard contents
+        keyboard = Controller()  # Initialize keyboard controller
+
+        if not clipboard_content:
+            print("Clipboard is empty!")
+            return
+
+        print("Typing clipboard contents...")
+        for char in clipboard_content:
+            keyboard.type(char)
+            time.sleep(0.05)  # Add delay between typing each character
+        
+        print("Finished typing clipboard contents.")
 
     def toggle_hotkeys_enabled(self):
         self.hotkeysEnabled = not self.hotkeysEnabled
@@ -155,7 +184,39 @@ class SecretMessageOverlay:
         
         self.toggle_visibility(f"Switched to {self.model.model_name} model.")
 
-    def ask_ai_with_screenshot(self):
+    def record_keys(self):
+
+        print("Recording keys... Press '=' to stop.")
+        recorded_keys = []
+
+        def on_press(key):
+            try:
+                # Capture printable characters
+                recorded_keys.append(key.char)
+            except AttributeError:
+                # Handle special keys
+                special_keys = {
+                    pykeyboard.Key.space: " ",
+                    pykeyboard.Key.enter: "\n",
+                    pykeyboard.Key.tab: "\t",
+                    pykeyboard.Key.backspace: "[BACKSPACE]",
+                    pykeyboard.Key.esc: "[ESC]",
+                    pykeyboard.Key.shift: "",
+                }
+                recorded_keys.append(special_keys.get(key, f"[{key}]"))  # Use mapping or show as [Key]
+
+            # Stop on '=' key
+            if hasattr(key, 'char') and key.char == "=":
+                print("Recording stopped.")
+                print("Recorded keys:", ''.join(recorded_keys))
+                self.ask_ai_with_clipboard(text=''.join(recorded_keys))
+                return False  # Stop the listener
+
+        # Start listening for keypresses
+        with pykeyboard.Listener(on_press=on_press) as listener:
+            listener.join()
+
+    def ask_ai_with_screenshot(self, prompt=""):
 
         if not self.hotkeysEnabled or not self.model:
             return
@@ -178,13 +239,13 @@ class SecretMessageOverlay:
 
             screenshot = PIL.Image.open(screenshot_path)
 
-            # PROMPT = "The following image contains a question or a statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer the image concisely, do not explain unless the question asks you to."
-            PROMPT = "The following image contains multiple choice questions. If you believe it does not contain multiple choice questions, say 'no mcq detected'. There may be an option selected, but it is not necessarily correct! Your goal is to find the correct option(s) for the questions in the image. Answer concisely, do not explain unless the question asks you to."
+            PROMPT = prompt or "The following image contains a question or a statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer the image concisely, do not explain unless the question asks you to. If you believe the problem is somewhat mathematical, please solve it step-by-step. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'."
             response = self.model.generate_content([PROMPT, screenshot])
 
             if response:
                 print(response)
                 self.toggle_visibility(response.text)
+                pyperclip.copy(response.text)
             else:
                 self.toggle_visibility("AI did not answer.")
         
@@ -193,28 +254,30 @@ class SecretMessageOverlay:
             self.toggle_visibility("Failed to ask AI.")
 
 
-    def ask_ai_with_clipboard(self):
+    def ask_ai_with_clipboard(self, text="", prompt=""):
 
         if not self.hotkeysEnabled or not self.model:
             return
 
         try:
 
-            clipboard_content = self.root.clipboard_get()
+            clipboard_content = text or self.root.clipboard_get()
 
             if not clipboard_content:
                 self.toggle_visibility("Clipboard is empty.")
                 return
 
-            PROMPT = "The following is a likely a question or statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer concisely, do not explain unless the question asks you to. Question: " + clipboard_content
+            PROMPT = prompt or "The following is a likely a question or statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer concisely, do not explain unless the question asks you to. If this is a programming question, answer in python. If this is an MCQ question, answer with the appropriate and correct answer. Feel free to do calculations to prove yourself. Question: " + clipboard_content
 
             response = self.model.generate_content(PROMPT)
             print(response)
 
             if response:
                 self.toggle_visibility(response.text)
+                pyperclip.copy(response.text)
             else:
                 self.toggle_visibility("AI did not answer.")
+
         except:
             self.toggle_visibility("Failed to ask AI.")
     
@@ -222,15 +285,27 @@ class SecretMessageOverlay:
 
         print("Starting keyboard listener")
 
-        for key in self.messageDictionary:  # MUST NOT HAVE Q OR F keys. They are reserved for toggling the program and searching.
-            keyboard.add_hotkey(key, self.toggle_visibility, args=(self.messageDictionary[key],))
+        if ENABLE_SECRET_MESSAGES:
+            for key in self.messageDictionary:  # MUST NOT HAVE Q OR F keys. They are reserved for toggling the program and searching.
+                keyboard.add_hotkey(key, self.toggle_visibility, args=(self.messageDictionary[key],))
         
         keyboard.add_hotkey('up', self.toggle_hotkeys_enabled) # Bind 'up' to toggle hotkeys
         keyboard.add_hotkey('left', self.prompt_and_search)  # Bind 'left' to prompt and search
         keyboard.add_hotkey('right', self.ask_ai_with_clipboard) # Bind 'right' to ask AI
         keyboard.add_hotkey('down', self.root.quit) # Bind 'down' to exit the program
-        keyboard.add_hotkey('0', self.ask_ai_with_screenshot) # Bind '0' to ask AI with screenshot
-        keyboard.add_hotkey('9', self.toggle_ai_model) # Bind '9' to toggle AI model
+        keyboard.add_hotkey('0', self.ask_ai_with_screenshot) # Bind '0' to ask about general questions
+        keyboard.add_hotkey('9', self.ask_ai_with_screenshot, 
+                            ("The following image contains a question or a statement that requires some sort of answer. If you believe the image does not contain such text, reply with 'no question or statement requiring answer'. If the question requires you to solve a problem, reply with a step-by-step solution to the problem. If you believe it is a statement, reply with a reason for it. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'",)
+                            ) # Bind '9' to ask AI about specific math-ish question
+        keyboard.add_hotkey('8', self.ask_ai_with_screenshot,
+                            ("The following image contains a programming related question. The language it expects is python, use only python unless specified otherwise. Do not wrap the code with ```, answer it raw. If you believe it does not contain a programming question, reply with 'no programming question'. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'. Answer the question concisely, do not explain unless the question asks you to. Make sure you write clear and correct code for the problem.",),
+                            ),
+        keyboard.add_hotkey('7', self.ask_ai_with_screenshot,
+                            ("The following image contains multiple choice questions. If you believe it does not contain multiple choice questions, say 'no mcq detected'. There may be an option selected, but it is not necessarily correct! Your goal is to find the correct option(s) for the questions in the image. Answer concisely, do not explain unless the question asks you to.",)
+                            ) # Bind '7' to ask AI about MCQ questions
+        keyboard.add_hotkey('1', self.toggle_ai_model) # Bind '9' to toggle AI model
+        keyboard.add_hotkey('2', self.type_clipboard_contents) # Bind '2' to type clipboard contents
+        keyboard.add_hotkey('3', self.record_keys) # Bind '3' to record keys temporarily until "=" is pressed and then ask AI.
 
         keyboard.wait()  # Keep the thread running
     
@@ -283,6 +358,7 @@ if __name__ == "__main__":
     }
 
     GEMINI_API_KEY = ""
+    ENABLE_SECRET_MESSAGES = True
     genai.configure(api_key=GEMINI_API_KEY)
 
     main()
