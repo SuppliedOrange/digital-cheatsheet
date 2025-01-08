@@ -4,7 +4,7 @@ A digital cheatsheet to cheat during tests. Also uses AI if you have internet.
 
 ## Has bypassed
 
-+ All websites that full-screen and block certain keys.
++ All websites that full-screen and block certain keys. (Infosys Springboard, etc.)
 + The Hackerearth proctoring browser. Only the keystroke recording method works for this, but I would recommend connecting to a remote computer of yours over VNC. They cannot detect that, apparently.
 
 ## However
