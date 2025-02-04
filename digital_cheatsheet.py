@@ -12,6 +12,9 @@ from pynput.keyboard import Controller
 import pynput.keyboard as pykeyboard
 import time
 
+from dotenv import load_dotenv
+config = load_dotenv()
+
 class SecretMessageOverlay:
 
     def __init__(self):
@@ -298,7 +301,7 @@ class SecretMessageOverlay:
                             ("The following image contains a question or a statement that requires some sort of answer. If you believe the image does not contain such text, reply with 'no question or statement requiring answer'. If the question requires you to solve a problem, reply with a step-by-step solution to the problem. If you believe it is a statement, reply with a reason for it. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'",)
                             ) # Bind '9' to ask AI about specific math-ish question
         keyboard.add_hotkey('8', self.ask_ai_with_screenshot,
-                            ("The following image contains a programming related question. The language it expects is python, use only python unless specified otherwise. Do not wrap the code with ```, answer it raw. If you believe it does not contain a programming question, reply with 'no programming question'. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'. Answer the question concisely, do not explain unless the question asks you to. Make sure you write clear and correct code for the problem.",),
+                            ("The following image contains a programming related question. The language it expects is C, use only that lanugage unless specified otherwise or you see a different script. Do not wrap the code with ```, answer it raw. If you believe it does not contain a programming question, reply with 'no programming question'. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'. Answer the question concisely, do not explain unless the question asks you to. Make sure you write clear and correct code for the problem. Double-check that your answer is correct and go step-by-step about the process that happens and how you came to your conclusion.",),
                             ),
         keyboard.add_hotkey('7', self.ask_ai_with_screenshot,
                             ("The following image contains multiple choice questions. If you believe it does not contain multiple choice questions, say 'no mcq detected'. There may be an option selected, but it is not necessarily correct! Your goal is to find the correct option(s) for the questions in the image. Answer concisely, do not explain unless the question asks you to.",)
@@ -357,7 +360,7 @@ if __name__ == "__main__":
         "p": "According to Bacon, the second fruit of friendship is: [Ans]: Benefit of the clarity of understanding\nRest, sleep, physical exercise, and cleanliness are a part of: [Ans]: Personal hygiene\nWhich of the following is necessary for a healthy person? [Ans]: All of the above\nA balanced diet should normally provide: [Ans]: 3,500 calories per day\nWhich of the following nourishes nerve cells? [Ans]: Vitamin B1"
     }
 
-    GEMINI_API_KEY = ""
+    GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
     ENABLE_SECRET_MESSAGES = True
     genai.configure(api_key=GEMINI_API_KEY)
 
