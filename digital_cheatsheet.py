@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import simpledialog
-import keyboard
 import threading
 import google.generativeai as genai
 from mss import mss
@@ -8,11 +7,14 @@ import os
 import tempfile
 import PIL.Image
 import pyperclip
-from pynput.keyboard import Controller
-import pynput.keyboard as pykeyboard
+from pynput.keyboard import Controller, Listener, Key
 import time
+import logging
 
 from dotenv import load_dotenv
+
+# Set up logging for debugging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 config = load_dotenv()
 
 class SecretMessageOverlay:
@@ -22,19 +24,24 @@ class SecretMessageOverlay:
         self.hotkeysEnabled = True
         self.image_directory = tempfile.mkdtemp()
 
-        self.modelNames = ["gemini-1.5-flash", "gemini-1.5-pro"]
+        self.modelNames = ["gemini-2.5-flash", "gemini-2.5-pro"]
+
+        # Track pressed keys for hotkey combinations
+        self.pressed_keys = set()
+        self.listener = None
 
         if GEMINI_API_KEY:
             genai.configure(api_key=GEMINI_API_KEY)
-            self.model = genai.GenerativeModel("gemini-1.5-flash")
+            self.model = genai.GenerativeModel("gemini-2.5-flash")
+            logging.info(f"Gemini AI initialized with model: {self.model.model_name}")
         else:
             self.model = None
+            logging.warning("GEMINI_API_KEY not found - AI features will be disabled")
 
         # Create the main window
         self.root = tk.Tk()
         self.root.title("Secret Message")
 
-        self.message = tk.StringVar()
         self.messageDictionary = {}
         
         self.messageDictionary = secret_messages
@@ -55,20 +62,35 @@ class SecretMessageOverlay:
         
         # Create a frame to control positioning and styling
         self.frame = tk.Frame(self.root, bg='white')
-        self.frame.pack(fill=tk.BOTH, expand=False,)  # Left margin of 10% of screen width
+        self.frame.pack(fill=tk.BOTH, expand=True)
         
-        # Create a label for the secret message
-        self.label = tk.Label(
-            self.frame, 
-            textvariable=self.message,
-            font=("Arial", 10),  # Reduced font size
-            bg='white', 
+        # Create a scrollable text widget instead of label
+        self.text_widget = tk.Text(
+            self.frame,
+            font=("Arial", 10),
+            bg='white',
             fg='black',
-            wraplength=max_width,  # Limit wrap length
-            justify=tk.LEFT,
-            anchor='w'  # Left-align the text
+            wrap=tk.WORD,  # Word wrapping
+            state=tk.DISABLED,  # Read-only
+            cursor="arrow",  # Normal cursor
+            relief=tk.FLAT,  # No border
+            highlightthickness=0,  # No focus highlight
+            padx=10,  # Horizontal padding
+            pady=10,  # Vertical padding
         )
-        self.label.pack(fill=tk.X)  # Changed to fill only horizontally
+        self.text_widget.pack(fill=tk.BOTH, expand=True)
+        
+        # Bind mouse wheel events for scrolling
+        self.text_widget.bind("<MouseWheel>", self._on_mousewheel)
+        self.text_widget.bind("<Button-4>", self._on_mousewheel)  # Linux scroll up
+        self.text_widget.bind("<Button-5>", self._on_mousewheel)  # Linux scroll down
+        
+        # Bind keyboard scrolling (using Page keys to avoid conflicts with hotkeys)
+        self.root.bind("<Page_Up>", lambda e: self._scroll_text(-10))
+        self.root.bind("<Page_Down>", lambda e: self._scroll_text(10))
+        
+        # Keep track of max_width for text wrapping
+        self.max_width = max_width
         
         # Position the window
         window_height = int(screen_height * 0.4)  # Reduced height
@@ -175,16 +197,18 @@ class SecretMessageOverlay:
 
         if not self.model:
             self.toggle_visibility("AI model not available.")
+            logging.warning("Attempted to toggle AI model but no model is available")
             return
         
         # Toggle between the available models
-        print(f"Switched from {self.model.model_name} to {self.modelNames[0] if self.model.model_name == self.modelNames[1] else self.modelNames[1]} model.")
+        old_model = self.model.model_name
         
         if self.model.model_name == f"models/{self.modelNames[0]}":
             self.model = genai.GenerativeModel(self.modelNames[1])
         else:
             self.model = genai.GenerativeModel(self.modelNames[0])
         
+        logging.info(f"AI model switched from {old_model} to {self.model.model_name}")
         self.toggle_visibility(f"Switched to {self.model.model_name} model.")
 
     def record_keys(self):
@@ -199,12 +223,12 @@ class SecretMessageOverlay:
             except AttributeError:
                 # Handle special keys
                 special_keys = {
-                    pykeyboard.Key.space: " ",
-                    pykeyboard.Key.enter: "\n",
-                    pykeyboard.Key.tab: "\t",
-                    pykeyboard.Key.backspace: "[BACKSPACE]",
-                    pykeyboard.Key.esc: "[ESC]",
-                    pykeyboard.Key.shift: "",
+                    Key.space: " ",
+                    Key.enter: "\n",
+                    Key.tab: "\t",
+                    Key.backspace: "[BACKSPACE]",
+                    Key.esc: "[ESC]",
+                    Key.shift: "",
                 }
                 recorded_keys.append(special_keys.get(key, f"[{key}]"))  # Use mapping or show as [Key]
 
@@ -212,20 +236,22 @@ class SecretMessageOverlay:
             if hasattr(key, 'char') and key.char == "=":
                 print("Recording stopped.")
                 print("Recorded keys:", ''.join(recorded_keys))
+                logging.info(f"Key recording stopped, recorded {len(recorded_keys)} keys")
                 self.ask_ai_with_clipboard(text=''.join(recorded_keys))
-                return False  # Stop the listener
+                return None  # Stop the listener
 
         # Start listening for keypresses
-        with pykeyboard.Listener(on_press=on_press) as listener:
+        with Listener(on_press=on_press) as listener:
             listener.join()
 
     def ask_ai_with_screenshot(self, prompt=""):
 
         if not self.hotkeysEnabled or not self.model:
+            logging.warning("Screenshot AI request blocked - hotkeys disabled or no model available")
             return
         
         try:
-
+            logging.info("Starting screenshot AI request")
             screenshot_path = ""
 
             with mss() as sct:
@@ -233,84 +259,170 @@ class SecretMessageOverlay:
                 screenshot_path = os.path.join(self.image_directory, "screenshot.png")
                 # Store the screenshot in the temporary directory
                 screenshot_path = sct.shot(output=screenshot_path)
-                # You can now use the screenshot_path for further processing
-                print(f"Screenshot saved at {screenshot_path}")
+                logging.info(f"Screenshot saved at {screenshot_path}")
             
             if not screenshot_path:
                 self.toggle_visibility("Failed to take screenshot.")
+                logging.error("Failed to take screenshot - no path returned")
                 return
 
             screenshot = PIL.Image.open(screenshot_path)
+            logging.info(f"Screenshot loaded, size: {screenshot.size}")
 
-            PROMPT = prompt or "The following image contains a question or a statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer the image concisely, do not explain unless the question asks you to. If you believe the problem is somewhat mathematical, please solve it step-by-step. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'."
-            response = self.model.generate_content([PROMPT, screenshot])
+            PROMPT = prompt or "Think through this step by step, but provide only your final answer without showing your thinking process. The following image contains a question or a statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer the image concisely, do not explain unless the question asks you to. If you believe the problem is somewhat mathematical, please solve it step-by-step but only show the final answer. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'."
+            
+            logging.info(f"Sending request to Gemini AI with prompt length: {len(PROMPT)} chars")
+            logging.debug(f"Prompt preview: {PROMPT[:100]}...")
+            
+            
+            response = self.model.generate_content(
+                [PROMPT, screenshot]
+            )
 
-            if response:
-                print(response)
+            if response and response.text:
+                logging.info(f"Gemini AI response received, length: {len(response.text)} chars")
+                logging.debug(f"Response preview: {response.text[:100]}...")
                 self.toggle_visibility(response.text)
                 pyperclip.copy(response.text)
             else:
+                logging.warning("Gemini AI returned empty or invalid response")
+                logging.debug(f"Full response object: {response}")
                 self.toggle_visibility("AI did not answer.")
         
         except Exception as e:
-            print(e)
+            logging.error(f"Screenshot AI request failed with error: {type(e).__name__}: {str(e)}")
             self.toggle_visibility("Failed to ask AI.")
 
 
     def ask_ai_with_clipboard(self, text="", prompt=""):
 
         if not self.hotkeysEnabled or not self.model:
+            logging.warning("Clipboard AI request blocked - hotkeys disabled or no model available")
             return
 
         try:
-
             clipboard_content = text or self.root.clipboard_get()
 
             if not clipboard_content:
                 self.toggle_visibility("Clipboard is empty.")
+                logging.warning("Clipboard AI request failed - clipboard is empty")
                 return
 
-            PROMPT = prompt or "The following is a likely a question or statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer concisely, do not explain unless the question asks you to. If this is a programming question, answer in python. If this is an MCQ question, answer with the appropriate and correct answer. Feel free to do calculations to prove yourself. Question: " + clipboard_content
+            logging.info(f"Starting clipboard AI request with content length: {len(clipboard_content)} chars")
+            logging.debug(f"Clipboard content preview: {clipboard_content[:100]}...")
 
-            response = self.model.generate_content(PROMPT)
-            print(response)
+            PROMPT = prompt or "Think through this step by step, but provide only your final answer without showing your thinking process. The following is a likely a question or statement that requires an answer. If you believe it does not have an answer, say 'no answer to this'. Answer concisely, do not explain unless the question asks you to. If this is a programming question, answer in python. If this is an MCQ question, answer with the appropriate and correct answer. Feel free to do calculations to prove yourself. Question: " + clipboard_content
 
-            if response:
+            logging.info(f"Sending request to Gemini AI with prompt length: {len(PROMPT)} chars")
+            
+            
+            response = self.model.generate_content(
+                PROMPT
+            )
+
+            if response and response.text:
+                logging.info(f"Gemini AI response received, length: {len(response.text)} chars")
+                logging.debug(f"Response preview: {response.text[:100]}...")
                 self.toggle_visibility(response.text)
                 pyperclip.copy(response.text)
             else:
+                logging.warning("Gemini AI returned empty or invalid response")
+                logging.debug(f"Full response object: {response}")
                 self.toggle_visibility("AI did not answer.")
 
-        except:
+        except Exception as e:
+            logging.error(f"Clipboard AI request failed with error: {type(e).__name__}: {str(e)}")
             self.toggle_visibility("Failed to ask AI.")
     
     def start_keyboard_listener(self):
 
         print("Starting keyboard listener")
 
-        if ENABLE_SECRET_MESSAGES:
-            for key in self.messageDictionary:  # MUST NOT HAVE Q OR F keys. They are reserved for toggling the program and searching.
-                keyboard.add_hotkey(key, self.toggle_visibility, args=(self.messageDictionary[key],))
-        
-        keyboard.add_hotkey('up', self.toggle_hotkeys_enabled) # Bind 'up' to toggle hotkeys
-        keyboard.add_hotkey('left', self.prompt_and_search)  # Bind 'left' to prompt and search
-        keyboard.add_hotkey('right', self.ask_ai_with_clipboard) # Bind 'right' to ask AI
-        keyboard.add_hotkey('down', self.root.quit) # Bind 'down' to exit the program
-        keyboard.add_hotkey('0', self.ask_ai_with_screenshot) # Bind '0' to ask about general questions
-        keyboard.add_hotkey('9', self.ask_ai_with_screenshot, 
-                            ("The following image contains a question or a statement that requires some sort of answer. If you believe the image does not contain such text, reply with 'no question or statement requiring answer'. If the question requires you to solve a problem, reply with a step-by-step solution to the problem. If you believe it is a statement, reply with a reason for it. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'",)
-                            ) # Bind '9' to ask AI about specific math-ish question
-        keyboard.add_hotkey('8', self.ask_ai_with_screenshot,
-                            ("The following image contains a programming related question. The language it expects is C, use only that lanugage unless specified otherwise or you see a different script. Do not wrap the code with ```, answer it raw. If you believe it does not contain a programming question, reply with 'no programming question'. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'. Answer the question concisely, do not explain unless the question asks you to. Make sure you write clear and correct code for the problem. Double-check that your answer is correct and go step-by-step about the process that happens and how you came to your conclusion.",),
-                            ),
-        keyboard.add_hotkey('7', self.ask_ai_with_screenshot,
-                            ("The following image contains multiple choice questions. If you believe it does not contain multiple choice questions, say 'no mcq detected'. There may be an option selected, but it is not necessarily correct! Your goal is to find the correct option(s) for the questions in the image. Answer concisely, do not explain unless the question asks you to.",)
-                            ) # Bind '7' to ask AI about MCQ questions
-        keyboard.add_hotkey('1', self.toggle_ai_model) # Bind '9' to toggle AI model
-        keyboard.add_hotkey('2', self.type_clipboard_contents) # Bind '2' to type clipboard contents
-        keyboard.add_hotkey('3', self.record_keys) # Bind '3' to record keys temporarily until "=" is pressed and then ask AI.
+        def on_press(key):
+            self.pressed_keys.add(key)
+            
+            # Handle single key presses
+            if hasattr(key, 'char') and key.char:
+                char = key.char.lower()
+                
+                # Secret messages hotkeys
+                if ENABLE_SECRET_MESSAGES and char in self.messageDictionary:
+                    self.toggle_visibility(self.messageDictionary[char])
+                
+                # Function hotkeys
+                elif char == '0':
+                    self.ask_ai_with_screenshot()
+                elif char == '1':
+                    self.toggle_ai_model()
+                elif char == '2':
+                    self.type_clipboard_contents()
+                elif char == '3':
+                    self.record_keys()
+                elif char == '7':
+                    self.ask_ai_with_screenshot("The following image contains multiple choice questions. If you believe it does not contain multiple choice questions, say 'no mcq detected'. There may be an option selected, but it is not necessarily correct! Your goal is to find the correct option(s) for the questions in the image. Answer concisely, do not explain unless the question asks you to.")
+                elif char == '8':
+                    self.ask_ai_with_screenshot("The following image contains a programming related question. The language it expects is C, use only that lanugage unless specified otherwise or you see a different script. Do not wrap the code with ```, answer it raw. If you believe it does not contain a programming question, reply with 'no programming question'. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'. Answer the question concisely, do not explain unless the question asks you to. Make sure you write clear and correct code for the problem. Double-check that your answer is correct and go step-by-step about the process that happens and how you came to your conclusion.")
+                elif char == '9':
+                    self.ask_ai_with_screenshot("The following image contains a question or a statement that requires some sort of answer. If you believe the image does not contain such text, reply with 'no question or statement requiring answer'. If the question requires you to solve a problem, reply with a step-by-step solution to the problem. If you believe it is a statement, reply with a reason for it. If you believe it is incomplete and you can't figure it out yourself, reply with 'incomplete, cannot solve or infer further question'")
+                elif char == '-':
+                    self.toggle_window_visibility()
+            
+            # Handle arrow keys
+            elif key == Key.up:
+                self.toggle_hotkeys_enabled()
+            elif key == Key.down:
+                self.root.quit()
+            elif key == Key.left:
+                self.prompt_and_search()
+            elif key == Key.right:
+                self.ask_ai_with_clipboard()
 
-        keyboard.wait()  # Keep the thread running
+        def on_release(key):
+            try:
+                self.pressed_keys.discard(key)
+            except KeyError:
+                pass
+
+        # Start the listener
+        self.listener = Listener(on_press=on_press, on_release=on_release)
+        self.listener.start()
+        self.listener.join()
+    
+    def toggle_window_visibility(self):
+        """Toggle window visibility without changing the text content"""
+        if not self.hotkeysEnabled:
+            if self.is_visible:
+                self.root.withdraw()
+                self.is_visible = False
+            return
+
+        # Toggle window visibility without updating content
+        if not self.is_visible:
+            # Show the window
+            self.root.deiconify()
+            self.is_visible = True
+        else:
+            # Hide the window
+            self.root.withdraw()
+            self.is_visible = False
+
+    def _on_mousewheel(self, event):
+        """Handle mouse wheel scrolling"""
+        if event.delta:  # Windows/Mac
+            delta = -1 * (event.delta / 120)
+        else:  # Linux
+            if event.num == 4:
+                delta = -1
+            elif event.num == 5:
+                delta = 1
+            else:
+                return
+        
+        self.text_widget.yview_scroll(int(delta), "units")
+    
+    def _scroll_text(self, direction):
+        """Handle keyboard scrolling"""
+        self.text_widget.yview_scroll(direction, "units")
     
     def toggle_visibility(self, updateMessage=""):
 
@@ -323,7 +435,13 @@ class SecretMessageOverlay:
 
             return
 
-        self.message.set(updateMessage)
+        # Update the text widget content instead of StringVar
+        if updateMessage:
+            self.text_widget.config(state=tk.NORMAL)  # Enable editing temporarily
+            self.text_widget.delete(1.0, tk.END)  # Clear existing content
+            self.text_widget.insert(1.0, updateMessage)  # Insert new content
+            self.text_widget.config(state=tk.DISABLED)  # Make read-only again
+            self.text_widget.see(1.0)  # Scroll to top
 
         # Toggle window visibility
         if not self.is_visible:
@@ -345,6 +463,7 @@ def main():
     overlay = SecretMessageOverlay()
     overlay.run()
 
+
 if __name__ == "__main__":
 
     secret_messages = {
@@ -360,9 +479,17 @@ if __name__ == "__main__":
         "p": "According to Bacon, the second fruit of friendship is: [Ans]: Benefit of the clarity of understanding\nRest, sleep, physical exercise, and cleanliness are a part of: [Ans]: Personal hygiene\nWhich of the following is necessary for a healthy person? [Ans]: All of the above\nA balanced diet should normally provide: [Ans]: 3,500 calories per day\nWhich of the following nourishes nerve cells? [Ans]: Vitamin B1"
     }
 
-    GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
+    # Check environment variables
+    GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+    
+    if GEMINI_API_KEY:
+        logging.info("GEMINI_API_KEY found in environment variables")
+        logging.debug(f"API key length: {len(GEMINI_API_KEY)} characters")
+    else:
+        logging.error("GEMINI_API_KEY not found in environment variables")
+    
     ENABLE_SECRET_MESSAGES = True
-    genai.configure(api_key=GEMINI_API_KEY)
+    logging.info(f"Secret messages enabled: {ENABLE_SECRET_MESSAGES}")
 
     main()
 
@@ -399,7 +526,7 @@ ICO NOTES
         "p": "Federal government definition: Centre-state power division\nFundamental Rights source: USA Constitution\nGuardians of public finances: CAG\nLok Sabha council cap: 15%\nNon-suspendable Right: Article 21 (National Emergency)\nGovernor oath: Chief Justice of respective HC\nState Emergency takeover: President",
         "a": "**Constitution Basics**:\n- **Definition**: Fundamental principles governing state and citizens.\n- **World’s Longest Constitution**: 465 articles, 25 parts, 12 schedules, 118 amendments (as of 2023), ~117,369 words.\n- **Drafting**: Idea proposed by M.N. Roy in 1934. Constituent Assembly formed (Dec 1946) under Cabinet Mission Plan; first meeting on 9 Dec 1946.\n- **Adoption & Enactment**: Adopted on 26 Nov 1949; effective from 26 Jan 1950.\n- **Drafting Duration**: 2 years, 11 months, 18 days; Cost: ₹64 lakh.\n- **Contributors**: Dr. B.R. Ambedkar (Chairman of Drafting Committee), 6 members including Alladi Krishnaswamy Ayyar, K.M. Munshi.",
         "s": "**Salient Features**:\n- **Blend of Rigidity & Flexibility**: Amendable via simple or special majority (Art. 368).\n- **Federal System with Unitary Bias**: Central dominance during emergencies (Art. 352, 356, 360).\n- **Sovereign, Socialist, Secular, Democratic, Republic**: Defined in Preamble (42nd Amendment, 1976).\n- **Parliamentary System**: President as constitutional head; PM holds executive powers.\n- **Single Citizenship**: Unlike dual citizenship systems (e.g., USA).\n- **Emergency Provisions**:\n  - National Emergency (352): War, external aggression, armed rebellion.\n  - State Emergency (356): Constitutional machinery failure in states.\n  - Financial Emergency (360): Threat to fiscal stability.",
-        "d": "**Preamble**:\n- Based on Nehru's \"Objective Resolution\" (13 Dec 1946); Amended by 42nd Amendment (1976): Added \"Socialist,\" \"Secular,\" \"Integrity.\"\n- Key ideals: Justice (social, economic, political), Liberty, Equality, Fraternity.\n\n**Fundamental Rights (Part III, Articles 12–35)**:\n1. **Right to Equality (14–18)**:\n   - Equal law protection (14).\n   - No discrimination on caste, creed, gender, etc. (15).\n   - Equal opportunity in public employment (16).\n   - Abolishes untouchability (17) and hereditary titles (18).",
+        "d": "**Preamble**:\n- Based on Nehru's "Objective Resolution" (13 Dec 1946); Amended by 42nd Amendment (1976): Added "Socialist," "Secular," "Integrity."\n- Key ideals: Justice (social, economic, political), Liberty, Equality, Fraternity.\n\n**Fundamental Rights (Part III, Articles 12–35)**:\n1. **Right to Equality (14–18)**:\n   - Equal law protection (14).\n   - No discrimination on caste, creed, gender, etc. (15).\n   - Equal opportunity in public employment (16).\n   - Abolishes untouchability (17) and hereditary titles (18).",
         "g": "2. **Right to Freedom (19–22)**:\n   - Speech, assembly, movement, residence, profession (19).\n   - Safeguards against arbitrary conviction (20) and detention (22).\n3. **Right Against Exploitation (23–24)**:\n   - Prohibits human trafficking and child labor (below 14 years in hazardous jobs).\n4. **Right to Freedom of Religion (25–28)**:\n   - Practice, propagate religion; no state-sponsored religion or taxes for religious purposes.\n5. **Cultural/Educational Rights (29–30)**:\n   - Minorities can preserve language, culture, and run institutions.\n6. **Right to Constitutional Remedies (32)**:\n   - Writs like Habeas Corpus, Mandamus, Prohibition, Certiorari, Quo Warranto enforce rights.",
         "h": "**Directive Principles of State Policy (Part IV, Articles 36–51)**:\n- **Socialist Principles**:\n  - Equal pay (39), legal aid (39A), improved public health (47).\n- **Gandhian Principles**:\n  - Panchayati Raj (40), prohibition (47), SC/ST welfare (46).\n- **Liberal Principles**:\n  - Uniform Civil Code (44), environmental protection (48A), international peace (51).\n- **Amendments**:\n  - 42nd (1976): Legal aid (39A), workers' participation (43A).\n  - 44th (1978): Reduced inequalities (38).\n  - 86th (2002): Early childhood education.",
         "j": "**Fundamental Duties (Part IVA, Article 51A)**:\n- Added by 42nd Amendment (1976); expanded by 86th (2002).\n- Includes: Abide by Constitution, preserve heritage, promote harmony, educate children (6–14 years).\n- Non-justiciable but enforceable through legislation.",
