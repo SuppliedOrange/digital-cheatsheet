@@ -481,6 +481,7 @@ if __name__ == "__main__":
 
     # Check environment variables
     GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+    
     if GEMINI_API_KEY:
         logging.info("GEMINI_API_KEY found in environment variables")
         logging.debug(f"API key length: {len(GEMINI_API_KEY)} characters")
@@ -489,10 +490,6 @@ if __name__ == "__main__":
     
     ENABLE_SECRET_MESSAGES = True
     logging.info(f"Secret messages enabled: {ENABLE_SECRET_MESSAGES}")
-    
-    if GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
-        logging.info("Gemini AI configured with API key")
 
     main()
 
