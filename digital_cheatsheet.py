@@ -238,7 +238,7 @@ class SecretMessageOverlay:
                 print("Recorded keys:", ''.join(recorded_keys))
                 logging.info(f"Key recording stopped, recorded {len(recorded_keys)} keys")
                 self.ask_ai_with_clipboard(text=''.join(recorded_keys))
-                return False  # Stop the listener
+                return None  # Stop the listener
 
         # Start listening for keypresses
         with Listener(on_press=on_press) as listener:
